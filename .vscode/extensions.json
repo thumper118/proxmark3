@@ -5,6 +5,7 @@
 		"ms-vscode.cpptools",
 		"austin.code-gnu-global",
 		"marus25.cortex-debug",
-		"augustocdias.tasks-shell-input"
+		"augustocdias.tasks-shell-input",
+		"espressif.esp-idf-extension"
 	]
 }
