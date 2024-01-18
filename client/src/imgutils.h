@@ -13,17 +13,27 @@
 //
 // See LICENSE.txt for the text of the license.
 //-----------------------------------------------------------------------------
-// Trace commands
+// Image utilities
 //-----------------------------------------------------------------------------
+#ifndef IMGUTILS_H__
+#define IMGUTILS_H__
 
-#ifndef CMDTRACE_H__
-#define CMDTRACE_H__
+#include <gd.h>
 
-#include "common.h"
+/*
+ * Converts a true color image to a palette image, using Floyd-Steinberg dithering.
+ *
+ * For color matching, this function uses the Euclidean distance between colors in the
+ * YCbCr color space, which yields to better results than using sRGB directly.
+ *
+ * A comparison can be found at https://twitter.com/Socram4x8/status/1733157380097995205/photo/1.
+ */
+gdImagePtr img_palettize(gdImagePtr rgb, int *palette, int palette_size);
 
-int CmdTrace(const char *Cmd);
-int CmdTraceList(const char *Cmd);
-int CmdTraceListAlias(const char *Cmd, const char *alias, const char *protocol);
-bool ImportTraceBuffer(uint8_t *trace_src, uint16_t trace_len);
+/*
+ * This function scales and crops the image to the given size.
+ * Think of "background-size: cover" in CSS.
+ */
+gdImagePtr img_crop_to_fit(gdImagePtr orig, int width, int height);
 
 #endif

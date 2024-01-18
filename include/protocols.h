@@ -434,6 +434,8 @@ ISO 7816-4 Basic interindustry commands. For command APDU's.
 #define PROTO_CRYPTORF  15
 #define SEOS            16
 #define PROTO_MFPLUS    17
+#define PROTO_TEXKOM    18
+#define PROTO_XEROX     19
 
 // Picopass fuses
 #define FUSE_FPERS   0x80
@@ -923,6 +925,9 @@ ISO 7816-4 Basic interindustry commands. For command APDU's.
 
 // 0x0A = ACK
 // 0x05 = NACK
+
+// XEROX Commands
+#define XEROX_READ_MEM                  0x20
 
 #endif
 // PROTOCOLS_H

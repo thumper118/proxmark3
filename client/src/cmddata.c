@@ -608,11 +608,14 @@ static int Cmdmandecoderaw(const char *Cmd) {
         uint64_t id = 0;
         uint32_t hi = 0;
         size_t idx = 0;
-        int res = Em410xDecode(bits, &size, &idx, &hi, &id);
+        size_t tmpsize = 0;
+        int res = Em410xDecode(bits, &tmpsize, &idx, &hi, &id);
         if (res > 0) {
             //need to adjust to set bitstream back to manchester encoded data
             //setDemodBuff(bits, size, idx);
             printEM410x(hi, id, false, res);
+
+            size = tmpsize;
         }
     }
     setDemodBuff(bits, size, 0);
@@ -870,7 +873,7 @@ int AutoCorrelate(const int *in, int *out, size_t len, size_t window, bool SaveG
         if (distance == -1) {
             distance = peaks[i];
             continue;
-        } 
+        }
 
         if (peaks[i] < distance) {
             distance = peaks[i];
@@ -1978,16 +1981,16 @@ int CmdTuneSamples(const char *Cmd) {
     struct p *package = (struct p *)resp.data.asBytes;
 
     if (package->v_lf125 > NON_VOLTAGE)
-        PrintAndLogEx(SUCCESS, "LF antenna: %5.2f V - %.2f kHz", (package->v_lf125 * ANTENNA_ERROR) / 1000.0, LF_DIV2FREQ(LF_DIVISOR_125));
+        PrintAndLogEx(SUCCESS, "At %.2f kHz .......... " _YELLOW_("%5.2f") " V", LF_DIV2FREQ(LF_DIVISOR_125), (package->v_lf125 * ANTENNA_ERROR) / 1000.0);
 
     if (package->v_lf134 > NON_VOLTAGE)
-        PrintAndLogEx(SUCCESS, "LF antenna: %5.2f V - %.2f kHz", (package->v_lf134 * ANTENNA_ERROR) / 1000.0, LF_DIV2FREQ(LF_DIVISOR_134));
+        PrintAndLogEx(SUCCESS, "At %.2f kHz .......... " _YELLOW_("%5.2f") " V", LF_DIV2FREQ(LF_DIVISOR_134), (package->v_lf134 * ANTENNA_ERROR) / 1000.0);
 
     if (package->v_lfconf > NON_VOLTAGE && package->divisor > 0 && package->divisor != LF_DIVISOR_125 && package->divisor != LF_DIVISOR_134)
-        PrintAndLogEx(SUCCESS, "LF antenna: %5.2f V - %.2f kHz", (package->v_lfconf * ANTENNA_ERROR) / 1000.0, LF_DIV2FREQ(package->divisor));
+        PrintAndLogEx(SUCCESS, "At %.2f kHz .......... " _YELLOW_("%5.2f") " V", LF_DIV2FREQ(package->divisor), (package->v_lfconf * ANTENNA_ERROR) / 1000.0);
 
     if (package->peak_v > NON_VOLTAGE && package->peak_f > 0)
-        PrintAndLogEx(SUCCESS, "LF optimal: %5.2f V - %6.2f kHz", (package->peak_v * ANTENNA_ERROR) / 1000.0, LF_DIV2FREQ(package->peak_f));
+        PrintAndLogEx(SUCCESS, "At %.2f kHz optimal... " _YELLOW_("%5.2f") " V", LF_DIV2FREQ(package->peak_f), (package->peak_v * ANTENNA_ERROR) / 1000.0);
 
     // Empirical measures in mV
     const double vdd_rdv4 = 9000;
@@ -2008,6 +2011,9 @@ int CmdTuneSamples(const char *Cmd) {
                 break;
             }
         }
+
+        PrintAndLogEx(SUCCESS, "");
+        PrintAndLogEx(SUCCESS, "Approx. Q factor measurement (*)");
         double lfq1 = 0;
         if (s4 != 0) { // we got all our points of interest
             double a = package->results[s2 - 1];
@@ -2017,12 +2023,12 @@ int CmdTuneSamples(const char *Cmd) {
             double d = package->results[s4];
             double f2 = LF_DIV2FREQ(s4 - 1 + (c - v_3db_scaled) / (c - d));
             lfq1 = LF_DIV2FREQ(package->peak_f) / (f1 - f2);
-            PrintAndLogEx(SUCCESS, "Approx. Q factor (*): %.1lf by frequency bandwidth measurement", lfq1);
+            PrintAndLogEx(SUCCESS, "Frequency bandwidth..... " _YELLOW_("%.1lf"), lfq1);
         }
 
         // Q measure with Vlr=Q*(2*Vdd/pi)
         double lfq2 = (double)package->peak_v * 3.14 / 2 / vdd;
-        PrintAndLogEx(SUCCESS, "Approx. Q factor (*): %.1lf by peak voltage measurement", lfq2);
+        PrintAndLogEx(SUCCESS, "Peak voltage............ " _YELLOW_("%.1lf"), lfq2);
         // cross-check results
         if (lfq1 > 3) {
             double approx_vdd = (double)package->peak_v * 3.14 / 2 / lfq1;
@@ -2047,34 +2053,40 @@ int CmdTuneSamples(const char *Cmd) {
     memset(judgement, 0, sizeof(judgement));
     // LF evaluation
     if (package->peak_v < LF_UNUSABLE_V)
-        snprintf(judgement, sizeof(judgement), _RED_("UNUSABLE"));
+        snprintf(judgement, sizeof(judgement), _RED_("unusable"));
     else if (package->peak_v < LF_MARGINAL_V)
-        snprintf(judgement, sizeof(judgement), _YELLOW_("MARGINAL"));
+        snprintf(judgement, sizeof(judgement), _YELLOW_("marginal"));
     else
-        snprintf(judgement, sizeof(judgement), _GREEN_("OK"));
+        snprintf(judgement, sizeof(judgement), _GREEN_("ok"));
 
-    PrintAndLogEx((package->peak_v < LF_UNUSABLE_V) ? WARNING : SUCCESS, "LF antenna is %s", judgement);
+    PrintAndLogEx((package->peak_v < LF_UNUSABLE_V) ? WARNING : SUCCESS, "LF antenna ( %s )", judgement);
 
+    PrintAndLogEx(NORMAL, "");
     PrintAndLogEx(INFO, "---------- " _CYAN_("HF Antenna") " ----------");
     // HF evaluation
-    if (package->v_hf > NON_VOLTAGE)
-        PrintAndLogEx(SUCCESS, "HF antenna: %5.2f V - 13.56 MHz", (package->v_hf * ANTENNA_ERROR) / 1000.0);
+    if (package->v_hf > NON_VOLTAGE) {
+        PrintAndLogEx(SUCCESS, "13.56 MHz............... " _YELLOW_("%5.2f") " V", (package->v_hf * ANTENNA_ERROR) / 1000.0);
+    }
 
     memset(judgement, 0, sizeof(judgement));
+
+    PrintAndLogEx(SUCCESS, "");
+    PrintAndLogEx(SUCCESS, "Approx. Q factor measurement (*)");
 
     if (package->v_hf >= HF_UNUSABLE_V) {
         // Q measure with Vlr=Q*(2*Vdd/pi)
         double hfq = (double)package->v_hf * 3.14 / 2 / vdd;
-        PrintAndLogEx(SUCCESS, "Approx. Q factor (*): %.1lf by peak voltage measurement", hfq);
+        PrintAndLogEx(SUCCESS, "peak voltage............ " _YELLOW_("%.1lf"), hfq);
     }
-    if (package->v_hf < HF_UNUSABLE_V)
-        snprintf(judgement, sizeof(judgement), _RED_("UNUSABLE"));
-    else if (package->v_hf < HF_MARGINAL_V)
-        snprintf(judgement, sizeof(judgement), _YELLOW_("MARGINAL"));
-    else
-        snprintf(judgement, sizeof(judgement), _GREEN_("OK"));
 
-    PrintAndLogEx((package->v_hf < HF_UNUSABLE_V) ? WARNING : SUCCESS, "HF antenna is %s", judgement);
+    if (package->v_hf < HF_UNUSABLE_V)
+        snprintf(judgement, sizeof(judgement), _RED_("unusable"));
+    else if (package->v_hf < HF_MARGINAL_V)
+        snprintf(judgement, sizeof(judgement), _YELLOW_("marginal"));
+    else
+        snprintf(judgement, sizeof(judgement), _GREEN_("ok"));
+
+    PrintAndLogEx((package->v_hf < HF_UNUSABLE_V) ? WARNING : SUCCESS, "HF antenna ( %s )", judgement);
     PrintAndLogEx(NORMAL, "\n(*) Q factor must be measured without tag on the antenna");
 
     // graph LF measurements
@@ -2086,8 +2098,16 @@ int CmdTuneSamples(const char *Cmd) {
     }
 
     if (test1 > 0) {
-        PrintAndLogEx(SUCCESS, "\nDisplaying LF tuning graph. Divisor %d (blue) is %.2f kHz, %d (red) is %.2f kHz.\n\n",
-                      LF_DIVISOR_134, LF_DIV2FREQ(LF_DIVISOR_134), LF_DIVISOR_125, LF_DIV2FREQ(LF_DIVISOR_125));
+        PrintAndLogEx(NORMAL, "");
+        PrintAndLogEx(INFO, "-------- " _CYAN_("LF tuning graph") " ---------");
+        PrintAndLogEx(SUCCESS, "Blue line  Divisor %d / %.2f kHz"
+                      , LF_DIVISOR_134
+                      , LF_DIV2FREQ(LF_DIVISOR_134)
+                     );
+        PrintAndLogEx(SUCCESS, "Red line   Divisor %d / %.2f kHz\n\n"
+                      , LF_DIVISOR_125
+                      , LF_DIV2FREQ(LF_DIVISOR_125)
+                     );
         g_GraphTraceLen = 256;
         g_CursorCPos = LF_DIVISOR_125;
         g_CursorDPos = LF_DIVISOR_134;
@@ -3175,7 +3195,7 @@ static int CmdDiff(const char *Cmd) {
     // dump magic card memory
     /*
     if (use_c) {
-        PrintAndLogEx(WARNING, "not implemented yet, feel free to contribute!");
+        PrintAndLogEx(INFO, " To be implemented, feel free to contribute!");
         return PM3_ENOTIMPL;
     }
     */
@@ -3183,21 +3203,41 @@ static int CmdDiff(const char *Cmd) {
     size_t biggest = (datalenA > datalenB) ? datalenA : datalenB;
     PrintAndLogEx(DEBUG, "data len:  %zu   A %zu  B %zu", biggest, datalenA, datalenB);
 
-    if (inA == NULL)
+    if (inA == NULL) {
         PrintAndLogEx(INFO, "inA null");
+    }
 
-    if (inB == NULL)
+    if (inB == NULL) {
         PrintAndLogEx(INFO, "inB null");
+    }
+
+
+    char hdr0[400] = {0};
 
     int hdr_sln = (width * 4) + 2;
-    char hdr0[300] = {0};
+    int max_fn_space = (width * 4);
 
-    int max_fn_space = (width * 5);
+    if (max_fn_space < fnlenA) {
+        truncate_filename(filenameA, max_fn_space);
+        fnlenA = strlen(filenameA);
+    }
 
-    if (fnlenA && fnlenB && (max_fn_space > fnlenA) && (max_fn_space > fnlenB)) {
+    if (max_fn_space < fnlenB) {
+        truncate_filename(filenameB, max_fn_space);
+        fnlenB = strlen(filenameB);
+    }
+
+    if (fnlenA && fnlenB) {
+
         snprintf(hdr0, sizeof(hdr0) - 1, " #  | " _CYAN_("%.*s"), max_fn_space, filenameA);
-        memset(hdr0 + strlen(hdr0), ' ', hdr_sln - strlen(filenameA) - 1);
+
+        // add space if needed
+        int padding_len = (hdr_sln - fnlenA - 1);
+        if (padding_len > 0) {
+            memset(hdr0 + strlen(hdr0), ' ', padding_len);
+        }
         snprintf(hdr0 + strlen(hdr0), sizeof(hdr0) - 1 - strlen(hdr0), "| " _CYAN_("%.*s"), max_fn_space, filenameB);
+
     } else {
         strcat(hdr0, " #  | " _CYAN_("a"));
         memset(hdr0 + strlen(hdr0), ' ', hdr_sln - 2);
@@ -3317,7 +3357,6 @@ static int CmdNumCon(const char *Cmd) {
     memset(dec, 0, sizeof(dec));
     int res = CLIParamStrToBuf(arg_get_str(ctx, 1), (uint8_t *)dec, sizeof(dec), &dlen);
 
-
     int hlen = 256;
     char hex[256];
     memset(hex, 0, sizeof(hex));
@@ -3346,13 +3385,13 @@ static int CmdNumCon(const char *Cmd) {
     mbedtls_mpi N;
     mbedtls_mpi_init(&N);
 
-
     // hex
     if (hlen > 0) {
         if (data_verify_hex((uint8_t *)hex, hlen) == false) {
             return PM3_EINVARG;
         }
         MBEDTLS_MPI_CHK(mbedtls_mpi_read_string(&N, 16, hex));
+        PrintAndLogEx(INFO, "Input hex len... %d", hlen);
     }
 
     // decimal
@@ -3365,6 +3404,7 @@ static int CmdNumCon(const char *Cmd) {
     if (blen > 0) {
         // should have bianry string check here too
         MBEDTLS_MPI_CHK(mbedtls_mpi_read_string(&N, 2, bin));
+        PrintAndLogEx(INFO, "Input bin len... %d", blen);
     }
 
     mbedtls_mpi base;
@@ -3416,7 +3456,7 @@ static int CmdNumCon(const char *Cmd) {
                 continue;
             }
 
-            switch(i) {
+            switch (i) {
                 case 0:
 //                    MBEDTLS_MPI_CHK(mbedtls_mpi_inv_mod(&N, &N, &base));
                     break;
@@ -3640,9 +3680,9 @@ static int CmdBinaryMap(const char *Cmd) {
     char *token = strtok((char *)template, ",");
 
     // header
-    PrintAndLogEx(INFO, "---+---------------------------");
+    PrintAndLogEx(INFO, "---+-------------------------");
     PrintAndLogEx(INFO, "   | b0 b1 b2 b3 b4 b5 b6 b7");
-    PrintAndLogEx(INFO, "---+---------------------------");
+    PrintAndLogEx(INFO, "---+-------------------------");
 
     uint8_t i = 0;
     uint8_t cnt = 1;
@@ -3650,7 +3690,7 @@ static int CmdBinaryMap(const char *Cmd) {
     while (token != NULL) {
         sscanf(token, "%d", &x);
 
-        PrintAndLogEx(INFO, " %d | %*.s" NOLF, cnt, i * 3, " ");
+        PrintAndLogEx(INFO, " %d | %.*s" NOLF, cnt, i * 3, "                         ");
 
         // incease with previous offset
         x += i;

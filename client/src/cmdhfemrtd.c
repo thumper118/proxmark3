@@ -200,9 +200,8 @@ static bool emrtd_exchange_commands(sAPDU_t apdu, bool include_le, uint16_t le, 
 }
 
 static int emrtd_exchange_commands_noout(sAPDU_t apdu, bool activate_field, bool keep_field_on) {
-    uint8_t response[PM3_CMD_DATA_SIZE];
+    uint8_t response[PM3_CMD_DATA_SIZE] = {0};
     size_t resplen = 0;
-
     return emrtd_exchange_commands(apdu, false, 0, response, 0, &resplen, activate_field, keep_field_on);
 }
 
@@ -987,7 +986,8 @@ static bool emrtd_do_auth(char *documentnumber, char *dob, char *expiry, bool BA
     // Select EF_COM
     if (emrtd_select_file_by_ef(dg_table[EF_COM].fileid) == false) {
         *BAC = true;
-        PrintAndLogEx(INFO, "Authentication is enforced. Will attempt external authentication.");
+        PrintAndLogEx(INFO, "Authentication is enforced");
+        PrintAndLogEx(INFO, "Switching to external authentication...");
     } else {
         *BAC = false;
         // Select EF_DG1
@@ -997,7 +997,8 @@ static bool emrtd_do_auth(char *documentnumber, char *dob, char *expiry, bool BA
         uint8_t response[EMRTD_MAX_FILE_SIZE] = { 0x00 };
         if (emrtd_read_file(response, &resplen, NULL, NULL, NULL, false) == false) {
             *BAC = true;
-            PrintAndLogEx(INFO, "Authentication is enforced. Will attempt external authentication.");
+            PrintAndLogEx(INFO, "Authentication is enforced");
+            PrintAndLogEx(INFO, "Switching to external authentication...");
         } else {
             *BAC = false;
         }
@@ -1006,9 +1007,9 @@ static bool emrtd_do_auth(char *documentnumber, char *dob, char *expiry, bool BA
     // Do Basic Access Control
     if (*BAC) {
         // If BAC isn't available, exit out and warn user.
-        if (!BAC_available) {
+        if (BAC_available == false) {
             PrintAndLogEx(ERR, "This eMRTD enforces authentication, but you didn't supply MRZ data. Cannot proceed.");
-            PrintAndLogEx(HINT, "Check out hf emrtd info/dump --help, supply data with -n -d and -e.");
+            PrintAndLogEx(HINT, "Check out `hf emrtd info/dump --h`, supply data with `-n` `-d` and `-e`");
             return false;
         }
 
@@ -1034,19 +1035,19 @@ int dumpHF_EMRTD(char *documentnumber, char *dob, char *expiry, bool BAC_availab
     }
 
     // Dump EF_CardAccess (if available)
-    if (!emrtd_dump_file(ks_enc, ks_mac, ssc, dg_table[EF_CardAccess].fileid, dg_table[EF_CardAccess].filename, BAC, path)) {
+    if (emrtd_dump_file(ks_enc, ks_mac, ssc, dg_table[EF_CardAccess].fileid, dg_table[EF_CardAccess].filename, BAC, path) == false) {
         PrintAndLogEx(INFO, "Couldn't dump EF_CardAccess, card does not support PACE");
         PrintAndLogEx(HINT, "This is expected behavior for cards without PACE, and isn't something to be worried about");
     }
 
     // Authenticate with the eMRTD
-    if (!emrtd_do_auth(documentnumber, dob, expiry, BAC_available, &BAC, ssc, ks_enc, ks_mac)) {
+    if (emrtd_do_auth(documentnumber, dob, expiry, BAC_available, &BAC, ssc, ks_enc, ks_mac) == false) {
         DropField();
         return PM3_ESOFT;
     }
 
     // Select EF_COM
-    if (!emrtd_select_and_read(response, &resplen, dg_table[EF_COM].fileid, ks_enc, ks_mac, ssc, BAC)) {
+    if (emrtd_select_and_read(response, &resplen, dg_table[EF_COM].fileid, ks_enc, ks_mac, ssc, BAC) == false) {
         PrintAndLogEx(ERR, "Failed to read EF_COM");
         DropField();
         return PM3_ESOFT;
@@ -1285,7 +1286,7 @@ static void emrtd_print_issuance(char *data, bool ascii) {
 }
 
 static void emrtd_print_personalization_timestamp(uint8_t *data, size_t datalen) {
-    if (datalen < 7 ) {
+    if (datalen < 7) {
         return;
     }
 
@@ -1294,13 +1295,13 @@ static void emrtd_print_personalization_timestamp(uint8_t *data, size_t datalen)
 
     char final_date[20] = { 0x00 };
     snprintf(final_date, sizeof(final_date), "%.4s-%.2s-%.2s %.2s:%.2s:%.2s"
-        , str_date
-        , str_date + 4
-        , str_date + 6
-        , str_date + 8
-        , str_date + 10
-        , str_date + 12
-    );
+             , str_date
+             , str_date + 4
+             , str_date + 6
+             , str_date + 8
+             , str_date + 10
+             , str_date + 12
+            );
 
     PrintAndLogEx(SUCCESS, "Personalization at....: " _YELLOW_("%s"), final_date);
 }
@@ -1311,13 +1312,13 @@ static void emrtd_print_unknown_timestamp_5f85(uint8_t *data, size_t datalen) {
     }
     char final_date[20] = { 0x00 };
     snprintf(final_date, sizeof(final_date), "%.4s-%.2s-%.2s %.2s:%.2s:%.2s"
-        , data
-        , data + 4
-        , data + 6
-        , data + 8
-        , data + 10
-        , data + 12
-    );
+             , data
+             , data + 4
+             , data + 6
+             , data + 8
+             , data + 10
+             , data + 12
+            );
 
     PrintAndLogEx(SUCCESS, "Unknown timestamp 5F85: " _YELLOW_("%s"), final_date);
     PrintAndLogEx(HINT, "This is very likely the personalization timestamp, but it is using an undocumented tag.");
@@ -1884,10 +1885,10 @@ int infoHF_EMRTD(char *documentnumber, char *dob, char *expiry, bool BAC_availab
         DropField();
         return PM3_ESOFT;
     }
-    bool use14b = GetISODEPState() == ISODEP_NFCB;
+    bool use14b = (GetISODEPState() == ISODEP_NFCB);
 
     // Read EF_CardAccess
-    if (!emrtd_select_and_read(response, &resplen, dg_table[EF_CardAccess].fileid, ks_enc, ks_mac, ssc, BAC)) {
+    if (emrtd_select_and_read(response, &resplen, dg_table[EF_CardAccess].fileid, ks_enc, ks_mac, ssc, BAC) == false) {
         PACE_available = false;
         PrintAndLogEx(HINT, "The error above this is normal. It just means that your eMRTD lacks PACE.");
     }
@@ -2044,6 +2045,7 @@ int infoHF_EMRTD_offline(const char *path) {
 
     // coverity scan CID 395630,
     if (data == NULL) {
+        free(filepath);
         return PM3_ESOFT;
     }
 

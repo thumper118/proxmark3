@@ -1091,6 +1091,7 @@ static int CmdSmartBruteforceSFI(const char *Cmd) {
         if (json_is_object(data) == false) {
             PrintAndLogEx(ERR, "\ndata %d is not an object\n", i + 1);
             json_decref(root);
+            free(buf);
             return PM3_ESOFT;
         }
 
@@ -1098,6 +1099,7 @@ static int CmdSmartBruteforceSFI(const char *Cmd) {
         if (json_is_string(jaid) == false) {
             PrintAndLogEx(ERR, "\nAID data [%d] is not a string", i + 1);
             json_decref(root);
+            free(buf);
             return PM3_ESOFT;
         }
 
@@ -1231,14 +1233,17 @@ static int CmdRelay(const char *Cmd) {
     CLIParserContext *ctx;
     CLIParserInit(&ctx, "smart relay",
                   "Make pm3 available to host OS smartcard driver via vpcd to enable use with other software such as GlobalPlatform Pro",
-                  "Requires the virtual smartcard daemon to be installed and running, see https://frankmorgner.github.io/vsmartcard/virtualsmartcard/README.html"
+                  "Requires the virtual smartcard daemon to be installed and running\n"
+                  "  see https://frankmorgner.github.io/vsmartcard/virtualsmartcard/README.html\n"
+                  "note:\n"
+                  "  `-v` shows APDU transactions between OS and card\n"
                  );
 
     void *argtable[] = {
         arg_param_begin,
-        arg_str0(NULL, "host", "<str>", "vpcd socket host (default: localhost)"),
-        arg_str0("p", "port", "<int>", "vpcd socket port (default: 35963)"),
-        arg_lit0("v", "verbose", "display APDU transactions between OS and card"),
+        arg_str0(NULL, "host", "<str>", "VPCD socket host (default: localhost)"),
+        arg_str0("p", "port", "<int>", "VPCD socket port (default: 35963)"),
+        arg_lit0("v", "verbose", "Verbose output"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -1313,7 +1318,7 @@ static int CmdRelay(const char *Cmd) {
                             continue;
                         }
                     } else if (cardType == ISODEP_NFCB) {
-                        if (exchange_14b_apdu(cmdbuf + 2, apduLen, !fieldActivated, true, apduRes, sizeof(apduRes), &apduResLen, 0))	{
+                        if (exchange_14b_apdu(cmdbuf + 2, apduLen, !fieldActivated, true, apduRes, sizeof(apduRes), &apduResLen, 0))    {
                             cardType = ISODEP_INACTIVE;
                             mbedtls_net_close(&netCtx);
                             continue;
@@ -1459,5 +1464,3 @@ bool smart_select(bool verbose, smart_card_atr_t *atr) {
 
     return true;
 }
-
-

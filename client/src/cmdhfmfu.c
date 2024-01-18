@@ -828,7 +828,10 @@ static int ulev1_print_configuration(uint64_t tagtype, uint8_t *data, uint8_t st
                 default:
                     break;
             }
-            PrintAndLogEx(INFO, "                mirror start page %02X | byte pos %02X - %s", mirror_page, mirror_byte, (mirror_page >= 0x4 && ((mirror_user_mem_start_byte + bytes_required_for_mirror_data) <= 144)) ? _GREEN_("OK") : _YELLOW_("Invalid value"));
+            PrintAndLogEx(INFO, "                mirror start page %02X | byte pos %02X - %s"
+                          , mirror_page, mirror_byte
+                          , (mirror_page >= 0x4 && ((mirror_user_mem_start_byte + bytes_required_for_mirror_data) <= 144)) ? _GREEN_("ok") : _YELLOW_("Invalid value")
+                         );
         }
 
     } else if (tagtype & (MFU_TT_NTAG_213_F | MFU_TT_NTAG_216_F)) {
@@ -2740,7 +2743,6 @@ static int CmdHF14AMfUDump(const char *Cmd) {
     if (is_partial) {
         PrintAndLogEx(WARNING, "Partial dump created. (%d of %d blocks)", pages, card_mem_size);
     }
-
     return PM3_SUCCESS;
 }
 
@@ -2911,7 +2913,7 @@ static int CmdHF14AMfURestore(const char *Cmd) {
         arg_lit0("s", NULL, "enable special write UID -MAGIC TAG ONLY-"),
         arg_lit0("e", NULL, "enable special write version/signature -MAGIC NTAG 21* ONLY-"),
         arg_lit0("r", NULL, "use password found in dumpfile to configure tag. Requires " _YELLOW_("'-e'") " parameter to work"),
-        arg_lit0("v", "verbose", "verbose"),
+        arg_lit0("v", "verbose", "verbose output"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, false);
@@ -3105,7 +3107,8 @@ static int CmdHF14AMfURestore(const char *Cmd) {
 
     DropField();
     free(dump);
-    PrintAndLogEx(INFO, "Restore finished");
+    PrintAndLogEx(HINT, "try `" _YELLOW_("hf mfu dump --ns") "` to verify");
+    PrintAndLogEx(INFO, "Done!");
     return PM3_SUCCESS;
 }
 //
@@ -4409,7 +4412,7 @@ int CmdHF14MfuNDEFRead(const char *Cmd) {
         arg_str0("k", "key", "Replace default key for NDEF", NULL),
         arg_lit0("l", NULL, "Swap entered key's endianness"),
         arg_str0("f", "file", "<fn>", "Save raw NDEF to file"),
-        arg_litn("v",  "verbose",  0, 2, "show technical data"),
+        arg_lit0("v",  "verbose", "Verbose output"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);

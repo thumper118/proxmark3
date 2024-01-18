@@ -116,6 +116,7 @@ static int CmdLFTune(const char *Cmd) {
         arg_lit0(NULL, "bar", "bar style"),
         arg_lit0(NULL, "mix", "mixed style"),
         arg_lit0(NULL, "value", "values style"),
+        arg_lit0("v", "verbose", "verbose output"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -126,6 +127,7 @@ static int CmdLFTune(const char *Cmd) {
     bool is_bar = arg_get_lit(ctx, 4);
     bool is_mix = arg_get_lit(ctx, 5);
     bool is_value = arg_get_lit(ctx, 6);
+    bool verbose = arg_get_lit(ctx, 7);
     CLIParserFree(ctx);
 
     if (divisor < 19) {
@@ -169,7 +171,7 @@ static int CmdLFTune(const char *Cmd) {
     clearCommandBuffer();
 
     SendCommandNG(CMD_MEASURE_ANTENNA_TUNING_LF, params, sizeof(params));
-    if (!WaitForResponseTimeout(CMD_MEASURE_ANTENNA_TUNING_LF, &resp, 1000)) {
+    if (WaitForResponseTimeout(CMD_MEASURE_ANTENNA_TUNING_LF, &resp, 1000) == false) {
         PrintAndLogEx(WARNING, "Timeout while waiting for Proxmark LF initialization, aborting");
         return PM3_ETIMEOUT;
     }
@@ -177,10 +179,13 @@ static int CmdLFTune(const char *Cmd) {
     params[0] = 2;
 
 //    #define MAX_ADC_LF_VOLTAGE 140800
-    uint32_t max = 71000;
+    uint32_t v_max = 71000;
+    uint32_t v_min = 71000;
+    uint64_t v_sum = 0;
+    uint64_t v_count = 0;
     bool first = true;
 
-    print_progress(0, max, style);
+    print_progress(0, v_max, style);
 
     // loop forever (till button pressed) if iter = 0 (default)
     for (uint32_t i = 0; iter == 0 || i < iter; i++) {
@@ -189,7 +194,7 @@ static int CmdLFTune(const char *Cmd) {
         }
 
         SendCommandNG(CMD_MEASURE_ANTENNA_TUNING_LF, params, sizeof(params));
-        if (!WaitForResponseTimeout(CMD_MEASURE_ANTENNA_TUNING_LF, &resp, 1000)) {
+        if (WaitForResponseTimeout(CMD_MEASURE_ANTENNA_TUNING_LF, &resp, 1000) == false) {
             PrintAndLogEx(NORMAL, "");
             PrintAndLogEx(WARNING, "Timeout while waiting for Proxmark LF measure, aborting");
             break;
@@ -202,13 +207,17 @@ static int CmdLFTune(const char *Cmd) {
 
         uint32_t volt = resp.data.asDwords[0];
         if (first) {
-            max = (volt * 1.03);
+            v_max = volt;
+            v_min = volt;
             first = false;
         }
-        if (volt > max) {
-            max = (volt * 1.03);
+        v_max = (volt > v_max) ? volt : v_max;
+        if (verbose) {
+            v_min = (volt < v_min) ? volt : v_min;
+            v_sum += volt;
+            v_count++;
         }
-        print_progress(volt, max, style);
+        print_progress(volt, v_max, style);
     }
 
     params[0] = 3;
@@ -218,7 +227,12 @@ static int CmdLFTune(const char *Cmd) {
         return PM3_ETIMEOUT;
     }
     PrintAndLogEx(NORMAL, "\x1b%c[2K\r", 30);
-    PrintAndLogEx(INFO, "Done.");
+    if (verbose) {
+        PrintAndLogEx(INFO, "Min....... %u mV", v_min);
+        PrintAndLogEx(INFO, "Max....... %u mV", v_max);
+        PrintAndLogEx(INFO, "Average... %.3lf mV", v_sum / (double)v_count);
+    }
+    PrintAndLogEx(INFO, "Done!");
     return PM3_SUCCESS;
 }
 
@@ -292,6 +306,7 @@ int CmdLFCommandRead(const char *Cmd) {
     payload.samples = samples;
     payload.keep_field_on = keep_field_on;
     payload.verbose = verbose;
+    memset(payload.symbol_extra, 0, sizeof(payload.symbol_extra));
 
     if (add_crc_ht && (cmd_len <= 120)) {
         // Hitag 1, Hitag S, ZX8211
@@ -734,6 +749,7 @@ static int lf_read_internal(bool realtime, bool verbose, uint64_t samples) {
         int result = set_fpga_mode(FPGA_BITSTREAM_LF);
         if (result != PM3_SUCCESS) {
             PrintAndLogEx(FAILED, "failed to load LF bitstream to FPGA");
+            free(realtimeBuf);
             return result;
         }
 
@@ -860,6 +876,7 @@ int lf_sniff(bool realtime, bool verbose, uint64_t samples) {
         int result = set_fpga_mode(FPGA_BITSTREAM_LF);
         if (result != PM3_SUCCESS) {
             PrintAndLogEx(FAILED, "failed to load LF bitstream to FPGA");
+            free(realtimeBuf);
             return result;
         }
 
@@ -1856,7 +1873,7 @@ int CmdLFfind(const char *Cmd) {
     }
 
     // psk
-    if (demodIdteck(true) == PM3_SUCCESS) {
+    if (demodIdteck(NULL, true) == PM3_SUCCESS) {
         PrintAndLogEx(SUCCESS, "\nValid " _GREEN_("Idteck ID") " found!");
         if (search_cont) {
             found++;
@@ -1916,13 +1933,13 @@ int CmdLFfind(const char *Cmd) {
         PrintAndLogEx(INFO, _CYAN_("Checking for unknown tags...") "\n");
 
         uint8_t ones[] = {
-                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-            };
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        };
 
         // FSK
         PrintAndLogEx(INFO, "FSK clock.......... " NOLF);
@@ -1971,7 +1988,7 @@ int CmdLFfind(const char *Cmd) {
                     check_autocorrelate("NRZ", clock);
                     found++;
                 } else {
-                    PrintAndLogEx(INFO, "NRZ ............... " _RED_("false positive")); 
+                    PrintAndLogEx(INFO, "NRZ ............... " _RED_("false positive"));
                     PrintAndLogEx(NORMAL, "");
                 }
             } else {

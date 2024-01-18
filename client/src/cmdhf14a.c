@@ -205,11 +205,11 @@ static const manufactureName_t manufactureMapping[] = {
 // returns description of the best match
 const char *getTagInfo(uint8_t uid) {
 
-    int i;
-
-    for (i = 0; i < ARRAYLEN(manufactureMapping); ++i)
-        if (uid == manufactureMapping[i].uid)
+    for (int i = 0; i < ARRAYLEN(manufactureMapping); ++i) {
+        if (uid == manufactureMapping[i].uid) {
             return manufactureMapping[i].desc;
+        }
+    }
 
     //No match, return default
     return manufactureMapping[ARRAYLEN(manufactureMapping) - 1].desc;
@@ -299,7 +299,8 @@ static int CmdHf14AConfig(const char *Cmd) {
 
     CLIParserContext *ctx;
     CLIParserInit(&ctx, "hf 14a config",
-                  "Configure 14a settings (use with caution)",
+                  "Configure 14a settings (use with caution)\n"
+                  "   `-v` also prints examples for reviving Gen2 cards",
                   "hf 14a config              -> Print current configuration\n"
                   "hf 14a config --std        -> Reset default configuration (follow standard)\n"
                   "hf 14a config --atqa std   -> Follow standard\n"
@@ -326,7 +327,7 @@ static int CmdHf14AConfig(const char *Cmd) {
         arg_str0(NULL, "cl3", "<std|force|skip>", "Configure SAK<>CL3 behavior"),
         arg_str0(NULL, "rats", "<std|force|skip>", "Configure RATS behavior"),
         arg_lit0(NULL, "std", "Reset default configuration: follow all standard"),
-        arg_lit0("v", "verbose", "verbose output, also prints examples for reviving Gen2 cards"),
+        arg_lit0("v", "verbose", "verbose output"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -665,7 +666,7 @@ static int CmdHF14AInfo(const char *Cmd) {
 
     void *argtable[] = {
         arg_param_begin,
-        arg_lit0("v",  "verbose",   "adds some information to results"),
+        arg_lit0("v",  "verbose",   "verbose output"),
         arg_lit0("n",  "nacktest",   "test for nack bug"),
         arg_lit0("s",  "aidsearch", "checks if AIDs from aidlist.json is present on the card and prints information about found AIDs"),
         arg_param_end
@@ -832,7 +833,7 @@ int CmdHF14ASim(const char *Cmd) {
 
     clearCommandBuffer();
     SendCommandNG(CMD_HF_ISO14443A_SIMULATE, (uint8_t *)&payload, sizeof(payload));
-    PacketResponseNG resp;
+    PacketResponseNG resp = {0};
 
     sector_t *k_sector = NULL;
     size_t k_sectors_cnt = MIFARE_4K_MAXSECTOR;
@@ -1006,6 +1007,11 @@ int SelectCard14443A_4_WithParameters(bool disconnect, bool verbose, iso14a_card
         return PM3_ECARDEXCHANGE;
     }
 
+    iso14a_card_select_t *vcard = (iso14a_card_select_t *) resp.data.asBytes;
+    if (card) {
+        memcpy(card, vcard, sizeof(iso14a_card_select_t));
+    }
+
     if (resp.oldarg[0] == 2) { // 0: couldn't read, 1: OK, with ATS, 2: OK, no ATS, 3: proprietary Anticollision
         // get ATS
         uint8_t rats[] = { 0xE0, 0x80 }; // FSDI=8 (FSD=256), CID=0
@@ -1029,18 +1035,18 @@ int SelectCard14443A_4_WithParameters(bool disconnect, bool verbose, iso14a_card
                 gs_frame_len = atsFSC[fsci];
             }
         }
+
+        if (card) {
+            card->ats_len = resp.oldarg[0];
+            memcpy(card->ats, resp.data.asBytes, card->ats_len);
+        }
     } else {
         // get frame length from ATS in card data structure
-        iso14a_card_select_t *vcard = (iso14a_card_select_t *) resp.data.asBytes;
         if (vcard->ats_len > 1) {
             uint8_t fsci = vcard->ats[1] & 0x0f;
             if (fsci < ARRAYLEN(atsFSC)) {
                 gs_frame_len = atsFSC[fsci];
             }
-        }
-
-        if (card) {
-            memcpy(card, vcard, sizeof(iso14a_card_select_t));
         }
     }
 
@@ -1060,11 +1066,44 @@ int SelectCard14443A_4(bool disconnect, bool verbose, iso14a_card_select_t *card
 static int CmdExchangeAPDU(bool chainingin, uint8_t *datain, int datainlen, bool activateField, uint8_t *dataout, int maxdataoutlen, int *dataoutlen, bool *chainingout) {
     *chainingout = false;
 
+    size_t timeout = 1500;
     if (activateField) {
         // select with no disconnect and set gs_frame_len
-        int selres = SelectCard14443A_4(false, true, NULL);
-        if (selres != PM3_SUCCESS)
+        iso14a_card_select_t card;
+        int selres = SelectCard14443A_4(false, true, &card);
+        if (selres != PM3_SUCCESS) {
             return selres;
+        }
+
+        // Extract FWI and SFGI from ATS and increase timeout by the indicated values
+        // for most cards these values are trivially small so will make no practical
+        // difference but some "cards" like hf_cardhopper overwrite these to their
+        // maximum values resulting in ~5 seconds each which can cause timeouts if we
+        // just ignore it
+        if (((card.ats[1] & 0x20) == 0x20) && card.ats_len > 2) {
+            // TB is present in ATS
+
+            uint8_t tb;
+            if ((card.ats[1] & 0x10) == 0x10 && card.ats_len > 3) {
+                // TA is also present, so TB at ats[3]
+                tb = card.ats[3];
+            } else {
+                // TA is not present, so TB is at ats[2]
+                tb = card.ats[2];
+            }
+
+            uint8_t fwi = (tb & 0xF0) >> 4;
+            if (fwi != 0x0F) {
+                uint32_t fwt = 256 * 16 * (1 << fwi);
+                timeout += fwt;
+            }
+
+            uint8_t sfgi = tb & 0x0F;
+            if (sfgi != 0x0F) {
+                uint32_t sgft = 256 * 16 * (1 << sfgi);
+                timeout += sgft;
+            }
+        }
     }
 
     uint16_t cmdc = 0;
@@ -1082,7 +1121,7 @@ static int CmdExchangeAPDU(bool chainingin, uint8_t *datain, int datainlen, bool
 
     PacketResponseNG resp;
 
-    if (WaitForResponseTimeout(CMD_ACK, &resp, 1500)) {
+    if (WaitForResponseTimeout(CMD_ACK, &resp, timeout)) {
         uint8_t *recv = resp.data.asBytes;
         int iLen = resp.oldarg[0];
         uint8_t res = resp.oldarg[1];
@@ -1216,54 +1255,59 @@ int ExchangeAPDU14a(uint8_t *datain, int datainlen, bool activateField, bool lea
 
 // ISO14443-4. 7. Half-duplex block transmission protocol
 static int CmdHF14AAPDU(const char *Cmd) {
-    uint8_t data[PM3_CMD_DATA_SIZE];
-    int datalen = 0;
-    uint8_t header[PM3_CMD_DATA_SIZE];
-    int headerlen = 0;
-    bool activateField = false;
-    bool leaveSignalON = false;
-    bool decodeTLV = false;
-    bool decodeAPDU = false;
-    bool makeAPDU = false;
-    bool extendedAPDU = false;
-    int le = 0;
-
     CLIParserContext *ctx;
     CLIParserInit(&ctx, "hf 14a apdu",
-                  "Sends an ISO 7816-4 APDU via ISO 14443-4 block transmission protocol (T=CL). works with all apdu types from ISO 7816-4:2013",
-                  "hf 14a apdu -st 00A404000E325041592E5359532E444446303100\n"
-                  "hf 14a apdu -sd 00A404000E325041592E5359532E444446303100        -> decode apdu\n"
-                  "hf 14a apdu -sm 00A40400 325041592E5359532E4444463031 -l 256    -> encode standard apdu\n"
-                  "hf 14a apdu -sm 00A40400 325041592E5359532E4444463031 -el 65536 -> encode extended apdu\n");
+                  "Sends an ISO 7816-4 APDU via ISO 14443-4 block transmission protocol (T=CL).\n"
+                  "Works with all APDU types from ISO 7816-4:2013\n"
+                  "\n"
+                  "note:\n"
+                  "   `-m` and `-d` goes hand in hand\n"
+                  "   -m <CLA INS P1 P2> -d 325041592E5359532E4444463031\n"
+                  "\n"
+                  "  OR\n"
+                  "\n"
+                  "   use `-d` with complete APDU data\n"
+                  "   -d 00A404000E325041592E5359532E444446303100",
+                  "hf 14a apdu -st -d 00A404000E325041592E5359532E444446303100\n"
+                  "hf 14a apdu -sd -d 00A404000E325041592E5359532E444446303100        -> decode apdu\n"
+                  "hf 14a apdu -sm 00A40400 -d 325041592E5359532E4444463031 -l 256    -> encode standard apdu\n"
+                  "hf 14a apdu -sm 00A40400 -d 325041592E5359532E4444463031 -el 65536 -> encode extended apdu\n");
 
     void *argtable[] = {
         arg_param_begin,
         arg_lit0("s",  "select",   "activate field and select card"),
         arg_lit0("k",  "keep",     "keep signal field ON after receive"),
-        arg_lit0("t",  "tlv",      "executes TLV decoder if it possible"),
-        arg_lit0("d",  "decapdu",  "decode apdu request if it possible"),
-        arg_str0("m",  "make",     "<head (CLA INS P1 P2) hex>", "make apdu with head from this field and data from data field. Must be 4 bytes length: <CLA INS P1 P2>"),
+        arg_lit0("t",  "tlv",      "decode TLV"),
+        arg_lit0(NULL, "decode",   "decode APDU request"),
+        arg_str0("m",  "make",     "<hex>", "APDU header, 4 bytes <CLA INS P1 P2>"),
         arg_lit0("e",  "extended", "make extended length apdu if `m` parameter included"),
-        arg_int0("l",  "le",       "<Le (int)>", "Le apdu parameter if `m` parameter included"),
-        arg_strx1(NULL, NULL,       "<APDU (hex) | data (hex)>", "data if `m` parameter included"),
+        arg_int0("l",  "le",       "<dec>", "Le APDU parameter if `m` parameter included"),
+        arg_strx1("d", "data",     "<hex>", "full APDU package or data if `m` parameter included"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, false);
 
-    activateField = arg_get_lit(ctx, 1);
-    leaveSignalON = arg_get_lit(ctx, 2);
-    decodeTLV = arg_get_lit(ctx, 3);
-    decodeAPDU = arg_get_lit(ctx, 4);
+    bool activateField = arg_get_lit(ctx, 1);
+    bool leaveSignalON = arg_get_lit(ctx, 2);
+    bool decodeTLV = arg_get_lit(ctx, 3);
+    bool decodeAPDU = arg_get_lit(ctx, 4);
 
+    uint8_t header[PM3_CMD_DATA_SIZE];
+    int headerlen = 0;
     CLIGetHexWithReturn(ctx, 5, header, &headerlen);
-    makeAPDU = headerlen > 0;
+
+    bool makeAPDU = (headerlen > 0);
+
     if (makeAPDU && headerlen != 4) {
         PrintAndLogEx(ERR, "header length must be 4 bytes instead of %d", headerlen);
         CLIParserFree(ctx);
         return PM3_EINVARG;
     }
-    extendedAPDU = arg_get_lit(ctx, 6);
-    le = arg_get_int_def(ctx, 7, 0);
+    bool extendedAPDU = arg_get_lit(ctx, 6);
+    int le = arg_get_int_def(ctx, 7, 0);
+
+    uint8_t data[PM3_CMD_DATA_SIZE];
+    int datalen = 0;
 
     if (makeAPDU) {
         uint8_t apdudata[PM3_CMD_DATA_SIZE] = {0};
@@ -1348,35 +1392,35 @@ static int CmdHF14ACmdRaw(const char *Cmd) {
 
     void *argtable[] = {
         arg_param_begin,
-        arg_lit0("a",  NULL, "active signal field ON without select"),
-        arg_int0("b",  NULL, "<dec>", "number of bits to send. Useful for send partial byte"),
-        arg_lit0("c",  NULL, "calculate and append CRC"),
-        arg_lit0("k",  NULL, "keep signal field ON after receive"),
-        arg_lit0("3",  NULL, "ISO14443-3 select only (skip RATS)"),
-        arg_lit0("r",  NULL, "do not read response"),
-        arg_lit0("s",  NULL, "active signal field ON with select"),
-        arg_int0("t",  "timeout", "<ms>", "timeout in milliseconds"),
-        arg_lit0("v",  "verbose", "Verbose output"),
-        arg_lit0(NULL, "topaz", "use Topaz protocol to send command"),
-        arg_lit0(NULL, "ecp", "use enhanced contactless polling"),
-        arg_lit0(NULL, "mag", "use Apple magsafe polling"),
-        arg_strx1(NULL, NULL, "<hex>", "raw bytes to send"),
+        arg_lit0("a",  NULL,              "Active signal field ON without select"),
+        arg_lit0("c",  NULL,              "Calculate and append CRC"),
+        arg_lit0("k",  NULL,              "Keep signal field ON after receive"),
+        arg_lit0("3",  NULL,              "ISO14443-3 select only (skip RATS)"),
+        arg_lit0("r",  NULL,              "Do not read response"),
+        arg_lit0("s",  NULL,              "Active signal field ON with select"),
+        arg_int0("t",  "timeout", "<ms>", "Timeout in milliseconds"),
+        arg_int0("b",  NULL,      "<dec>", "Number of bits to send. Useful for send partial byte"),
+        arg_lit0("v",  "verbose",         "Verbose output"),
+        arg_lit0(NULL, "ecp",             "Use enhanced contactless polling"),
+        arg_lit0(NULL, "mag",             "Use Apple magsafe polling"),
+        arg_lit0(NULL, "topaz",           "Use Topaz protocol to send command"),
+        arg_strx1(NULL, NULL,     "<hex>", "Raw bytes to send"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, false);
 
     bool active = arg_get_lit(ctx, 1);
-    uint16_t numbits = (uint16_t)arg_get_int_def(ctx, 2, 0);
-    bool crc = arg_get_lit(ctx, 3);
-    bool keep_field_on = arg_get_lit(ctx, 4);
-    bool no_rats =  arg_get_lit(ctx, 5);
-    bool reply = (arg_get_lit(ctx, 6) == false);
-    bool active_select = arg_get_lit(ctx, 7);
-    uint32_t timeout = (uint32_t)arg_get_int_def(ctx, 8, 0);
+    bool crc = arg_get_lit(ctx, 2);
+    bool keep_field_on = arg_get_lit(ctx, 3);
+    bool no_rats =  arg_get_lit(ctx, 4);
+    bool reply = (arg_get_lit(ctx, 5) == false);
+    bool active_select = arg_get_lit(ctx, 6);
+    uint32_t timeout = (uint32_t)arg_get_int_def(ctx, 7, 0);
+    uint16_t numbits = (uint16_t)arg_get_int_def(ctx, 8, 0);
     bool verbose = arg_get_lit(ctx, 9);
-    bool topazmode = arg_get_lit(ctx, 10);
-    bool use_ecp = arg_get_lit(ctx, 11);
-    bool use_magsafe = arg_get_lit(ctx, 12);
+    bool use_ecp = arg_get_lit(ctx, 10);
+    bool use_magsafe = arg_get_lit(ctx, 11);
+    bool topazmode = arg_get_lit(ctx, 12);
 
     int datalen = 0;
     uint8_t data[PM3_CMD_DATA_SIZE_MIX] = {0};
@@ -2410,7 +2454,7 @@ int infoHF14A(bool verbose, bool do_nack_test, bool do_aid_search) {
 
     int isMagic = 0;
     if (isMifareClassic) {
-        isMagic = detect_mf_magic(true, MF_KEY_A, 0);
+        isMagic = detect_mf_magic(true, MF_KEY_B, 0xFFFFFFFFFFFF);
     }
     if (isMifareUltralight) {
         isMagic = (detect_mf_magic(false, MF_KEY_A, 0) == MAGIC_NTAG21X);
@@ -2764,7 +2808,7 @@ int CmdHF14ANdefRead(const char *Cmd) {
     void *argtable[] = {
         arg_param_begin,
         arg_str0("f", "file", "<fn>", "save raw NDEF to file"),
-        arg_litn("v",  "verbose",  0, 2, "show technical data"),
+        arg_litn("v",  "verbose",  0, 2, "verbose output"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -2991,7 +3035,7 @@ int CmdHF14ANdefFormat(const char *Cmd) {
 
     void *argtable[] = {
         arg_param_begin,
-        arg_litn("v",  "verbose",  0, 2, "show technical data"),
+        arg_lit0("v",  "verbose",  "verbose output"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);

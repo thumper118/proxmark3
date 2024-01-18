@@ -69,8 +69,6 @@ static dmabuf8_t dma_8 = {
     .buf = NULL
 };
 
-
-
 // trace related variables
 static uint32_t trace_len = 0;
 static bool tracing = true;
@@ -94,11 +92,16 @@ uint32_t BigBuf_get_size(void) {
 // get the address of the emulator memory. Allocate part of Bigbuf for it, if not yet done
 uint8_t *BigBuf_get_EM_addr(void) {
     // not yet allocated
-    if (emulator_memory == NULL)
-        emulator_memory = BigBuf_malloc(CARD_MEMORY_SIZE);
-
+    if (emulator_memory == NULL) {
+        emulator_memory = BigBuf_calloc(CARD_MEMORY_SIZE);
+    }
     return emulator_memory;
 }
+
+uint32_t BigBuf_get_hi(void) {
+    return s_bigbuf_hi;
+}
+
 /*
 uint32_t BigBuf_get_EM_size(void) {
     return CARD_MEMORY_SIZE;
@@ -363,8 +366,9 @@ void tosend_stuffbit(int b) {
 }
 
 dmabuf16_t *get_dma16(void) {
-    if (dma_16.buf == NULL)
+    if (dma_16.buf == NULL) {
         dma_16.buf = (uint16_t *)BigBuf_malloc(DMA_BUFFER_SIZE * sizeof(uint16_t));
+    }
 
     return &dma_16;
 }

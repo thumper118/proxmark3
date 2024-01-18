@@ -355,12 +355,14 @@ void *uart_reconnect(void *targ) {
     }
 
     while (1) {
+        // throttle
+        msleep(200);
         if (OpenProxmarkSilent(&g_session.current_device, connection->serial_port_name, speed) == false) {
             continue;
         }
 
         if (g_session.pm3_present && (TestProxmark(g_session.current_device) != PM3_SUCCESS)) {
-            CloseProxmark(g_session.current_device);            
+            CloseProxmark(g_session.current_device);
         } else {
             break;
         }
@@ -699,7 +701,7 @@ size_t GetCommunicationRawReceiveNum(void) {
 
 bool OpenProxmarkSilent(pm3_device_t **dev, const char *port, uint32_t speed) {
 
-    sp = uart_open(port, speed);
+    sp = uart_open(port, speed, true);
 
     // check result of uart opening
     if (sp == INVALID_SERIAL_PORT) {
@@ -726,7 +728,7 @@ bool OpenProxmarkSilent(pm3_device_t **dev, const char *port, uint32_t speed) {
         pthread_create(&communication_thread, NULL, &uart_communication, &g_conn);
         __atomic_clear(&comm_thread_dead, __ATOMIC_SEQ_CST);
         __atomic_clear(&reconnect_ok, __ATOMIC_SEQ_CST);
-        
+
         g_session.pm3_present = true; // TODO support for multiple devices
 
         fflush(stdout);
@@ -740,16 +742,16 @@ bool OpenProxmarkSilent(pm3_device_t **dev, const char *port, uint32_t speed) {
 
 bool OpenProxmark(pm3_device_t **dev, const char *port, bool wait_for_port, int timeout, bool flash_mode, uint32_t speed) {
 
-    if (!wait_for_port) {
-        PrintAndLogEx(INFO, "Using UART port " _YELLOW_("%s"), port);
-        sp = uart_open(port, speed);
+    if (wait_for_port == false) {
+        PrintAndLogEx(SUCCESS, "Using UART port " _GREEN_("%s"), port);
+        sp = uart_open(port, speed, false);
     } else {
         PrintAndLogEx(SUCCESS, "Waiting for Proxmark3 to appear on " _YELLOW_("%s"), port);
         fflush(stdout);
         int openCount = 0;
         PrintAndLogEx(INPLACE, "% 3i", timeout);
         do {
-            sp = uart_open(port, speed);
+            sp = uart_open(port, speed, false);
             msleep(500);
             PrintAndLogEx(INPLACE, "% 3i", timeout - openCount - 1);
 
@@ -801,8 +803,9 @@ int TestProxmark(pm3_device_t *dev) {
 
     uint16_t len = 32;
     uint8_t data[len];
-    for (uint16_t i = 0; i < len; i++)
+    for (uint16_t i = 0; i < len; i++) {
         data[i] = i & 0xFF;
+    }
 
     __atomic_store_n(&last_packet_time,  msclock(), __ATOMIC_SEQ_CST);
     clearCommandBuffer();
@@ -836,7 +839,7 @@ int TestProxmark(pm3_device_t *dev) {
 
     if ((resp.length != sizeof(g_pm3_capabilities)) || (resp.data.asBytes[0] != CAPABILITIES_VERSION)) {
         PrintAndLogEx(ERR, _RED_("Capabilities structure version sent by Proxmark3 is not the same as the one used by the client!"));
-        PrintAndLogEx(ERR, _RED_("Please flash the Proxmark with the same version as the client."));
+        PrintAndLogEx(ERR, _RED_("Please flash the Proxmark3 with the same version as the client."));
         return PM3_EDEVNOTSUPP;
     }
 
@@ -848,14 +851,14 @@ int TestProxmark(pm3_device_t *dev) {
     bool is_bt_conn = (memcmp(g_conn.serial_port_name, "bt:", 3) == 0);
     bool is_udp_conn = (g_conn.send_via_ip == PM3_UDPv4 || g_conn.send_via_ip == PM3_UDPv6);
 
-    PrintAndLogEx(INFO, "Communicating with PM3 over %s%s%s%s",
-                  (g_conn.send_via_fpc_usart) ? _YELLOW_("FPC UART") : _YELLOW_("USB-CDC"),
-                  (is_tcp_conn) ? " over " _YELLOW_("TCP") : "",
-                  (is_bt_conn) ? " over " _YELLOW_("BT") : "",
-                  (is_udp_conn) ? " over " _YELLOW_("UDP") : ""
+    PrintAndLogEx(SUCCESS, "Communicating with PM3 over %s%s%s%s",
+                  (g_conn.send_via_fpc_usart) ? _GREEN_("FPC UART") : _GREEN_("USB-CDC"),
+                  (is_tcp_conn) ? " over " _GREEN_("TCP") : "",
+                  (is_bt_conn) ? " over " _GREEN_("BT") : "",
+                  (is_udp_conn) ? " over " _GREEN_("UDP") : ""
                  );
     if (g_conn.send_via_fpc_usart) {
-        PrintAndLogEx(INFO, "PM3 UART serial baudrate: " _YELLOW_("%u") "\n", g_conn.uart_speed);
+        PrintAndLogEx(SUCCESS, "PM3 UART serial baudrate: " _GREEN_("%u") "\n", g_conn.uart_speed);
     } else {
         int res;
         if (g_conn.send_via_local_ip) {
